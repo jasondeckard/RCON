@@ -7,7 +7,7 @@ RCON is a POSIX compliant command-line utility to facilitate communication with 
 
 ## Installation
 
-`make install` will compile the utility using gcc and copy it to $HOME/bin.  A sample configuration file, .rcon, will be copied to the current user's home directory.
+`make install` will compile the utility using gcc and copy it to $HOME/bin.  A sample configuration file, .rcon, will be copied to the current user's home directory.  The configuration file should be updated with information regarding your server(s) before using RCON.
 
 ## Configuration
 
