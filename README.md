@@ -19,11 +19,11 @@ The GNU C development libraries and header files are required to build RCON.
 
 ### Install
 
-`make install` will compile the utility using gcc and copy it to $HOME/bin.  A sample configuration file, .rcon, will be copied to the current user's home directory.  The configuration file should be updated with information regarding your server(s) prior to using RCON.
+`make install` will compile the utility using gcc and copy it to $HOME/bin.  A sample configuration file, rcon.conf, will be copied to $HOME/.config/rcon.  The configuration file should be updated with information regarding your server(s) prior to using RCON.
 
 ## Configuration
 
-RCON relies on the existance of the configuration file $HOME/.rcon to obtain server addresses and, optionally, RCON passwords.  A server entry in the configuration file takes the form:
+RCON relies on the existance of the configuration file $HOME/.config/rcon/rcon.conf to obtain server addresses and, optionally, RCON passwords.  A server entry in the configuration file takes the form:
 
 > alias,IP Address,port\[,password\]
 
