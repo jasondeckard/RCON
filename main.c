@@ -5,9 +5,9 @@
  * Source RCON Protocol as defined on the Valve Developer website at
  * https://developer.valvesoftware.com/wiki/Source_RCON_Protocol.
  *
- * This application expects to find a configuration file named .rcon in the
- * user's home directory.  The configuration file should contain an entry for
- * each RCON capable server you want to access with this utility, using the
+ * This application expects to find a configuration file named
+ * ~/.config/rcon/rcon.conf.  The configuration file should contain an entry
+ * for each RCON capable server you want to access with this utility, using the
  * format:
  *
  * 	name,IP address,port[,password]
@@ -94,6 +94,7 @@ int main(int argc, char **argv)
 	if (rval) {
 		errno = rval;
 		perror("rcon_send");
+		return rval;
 	}
 
 	response = rcon_recv();
@@ -214,7 +215,7 @@ int load_config(const char *target)
 
 
 /*
- * Provides a file pointer to ~/.rcon
+ * Provides a file pointer to ~/.config/rcon/rcon.conf
  *
  * Returns NULL on failure.
  */
@@ -226,12 +227,12 @@ FILE * open_config(void)
 
 	errno = 0; /* Per getpwuid man page */
 	home_dir = getpwuid(getuid())->pw_dir;
-	path = calloc(strlen(home_dir) + 7, sizeof(char));
+	path = calloc(strlen(home_dir) + 24, sizeof(char));
 	if (path == NULL)
 		return NULL;
 
 	strcpy(path, home_dir);
-	strcat(path, "/.rcon");
+	strcat(path, "/.config/rcon/rcon.conf");
 
 	file = fopen(path, "r");
 	free(path);
