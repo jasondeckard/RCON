@@ -187,7 +187,7 @@ char * get_password(void)
  * call rcon_init() with the details.  Returns zero on success, and errno on
  * failure.
  *
- * The configuration file is expected in ~/.rcon and contains one line
+ * The configuration file is expected as ~/.config/rcon/rcon.conf and contains one line
  * for each server entry using this format:
  *
  * 	target_name,IP address,port,password
@@ -242,7 +242,7 @@ FILE * open_config(void)
 
 
 /*
- * Parse the provided configurate entry and call rcon_init().  The user is
+ * Parse the provided configuration entry and call rcon_init().  The user is
  * prompted for a password if one is not provided in the configuration line.
  *
  * Returns zero on success and errno on failure.
