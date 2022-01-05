@@ -1,4 +1,7 @@
 # RCON
+
+![Build](https://github.com/jasondeckard/RCON/actions/workflows/main.yml/badge.svg)
+
 A Source RCON Protocol command-line utility.
 
 ## Description
