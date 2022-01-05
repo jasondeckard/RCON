@@ -1,6 +1,4 @@
-# RCON
-
-![Build](https://github.com/jasondeckard/RCON/actions/workflows/c-cpp.yml/badge.svg) ![Flawfinder](https://github.com/jasondeckard/RCON/actions/workflows/flawfinder-analysis.yml/badge.svg)
+# RCON ![Build](https://github.com/jasondeckard/RCON/actions/workflows/c-cpp.yml/badge.svg) ![Flawfinder](https://github.com/jasondeckard/RCON/actions/workflows/flawfinder-analysis.yml/badge.svg)
 
 A Source RCON Protocol command-line utility.
 
