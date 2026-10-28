@@ -5,351 +5,339 @@ const uint32_t SERVERDATA_AUTH_RESPONSE = 2;
 const uint32_t SERVERDATA_EXECCOMMAND = 2;
 const uint32_t SERVERDATA_RESPONSE_VALUE = 0;
 
-/* 
- * Create a socket and connect to the target server identified with
- * rcon_init(), and send the specified password.
- *
- * Return zero on success and errno on failure.
- */
-int rcon_auth(const char *password)
-{
-	uint32_t id;
-	struct rcon_packet *packet = NULL;
-	int rval;
-	uint32_t type;
+static struct rcon_packet *rcon_create_packet(rcon_connection *conn, const char *body, uint32_t message_type);
+static void rcon_free_packet(struct rcon_packet *packet);
+static struct rcon_packet *rcon_recv_packet(rcon_connection *conn);
+static int rcon_send_packet(rcon_connection *conn, const struct rcon_packet *packet);
 
-	if (rcon_is_connected == true)
+struct rcon_packet {
+	uint32_t size;
+	uint32_t id;
+	uint32_t type;
+	char *body;
+	char empty;
+};
+
+int rcon_init(rcon_connection *conn, const char *address, uint16_t port)
+{
+	struct timeval timeout;
+	int rval;
+
+	if (conn == NULL || address == NULL)
+		return EINVAL;
+
+	memset(conn, 0, sizeof(*conn));
+	conn->packet_id = 0;
+	conn->is_connected = false;
+	conn->sockfd = -1;
+
+	conn->sockaddr.sin_family = AF_INET;
+	conn->sockaddr.sin_addr.s_addr = inet_addr(address);
+	if (conn->sockaddr.sin_addr.s_addr == INADDR_NONE)
+		return EINVAL;
+	conn->sockaddr.sin_port = htons(port);
+
+	conn->sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	if (conn->sockfd == -1)
+		return errno;
+
+	timeout.tv_sec = RCON_RECV_TIMEOUT_SEC;
+	timeout.tv_usec = 0;
+	rval = setsockopt(conn->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	if (rval == -1) {
+		close(conn->sockfd);
+		conn->sockfd = -1;
+		return errno;
+	}
+
+	return 0;
+}
+
+int rcon_auth(rcon_connection *conn, const char *password)
+{
+	struct rcon_packet *packet;
+	uint32_t id, type;
+	int rval;
+
+	if (conn == NULL || password == NULL)
+		return EINVAL;
+	if (conn->is_connected)
 		return EISCONN;
 
-	rval = connect(rcon_sockfd,
-			(const struct sockaddr *) &rcon_sockaddr,
-		       	sizeof(rcon_sockaddr));
+	rval = connect(conn->sockfd, (const struct sockaddr *)&conn->sockaddr, sizeof(conn->sockaddr));
 	if (rval == -1)
 		return errno;
-	else
-		rcon_is_connected = true;
+	conn->is_connected = true;
 
-	packet = rcon_create_packet(password, SERVERDATA_AUTH);
+	packet = rcon_create_packet(conn, password, SERVERDATA_AUTH);
 	if (packet == NULL)
 		return errno;
 
-	rval = rcon_send_packet((const struct rcon_packet *) packet);
+	rval = rcon_send_packet(conn, packet);
 	rcon_free_packet(packet);
 	if (rval)
 		return rval;
 
-	for(;;) {
-		packet = rcon_recv_packet();
+	for (;;) {
+		packet = rcon_recv_packet(conn);
+		if (packet == NULL)
+			return errno ? errno : EIO;
+
 		id = packet->id;
 		type = packet->type;
 		rcon_free_packet(packet);
 
 		if (type == SERVERDATA_AUTH_RESPONSE) {
-			if (id == -1)
-				rval = EACCES;
-			else
-				rval = 0;
-
-			break;
+			return (id == (uint32_t)-1) ? EACCES : 0;
 		}
 	}
+}
 
+int rcon_disconnect(rcon_connection *conn)
+{
+	int rval;
+
+	if (conn == NULL)
+		return EINVAL;
+	if (!conn->is_connected)
+		return ENOTCONN;
+
+	rval = close(conn->sockfd);
+	conn->sockfd = -1;
+	conn->is_connected = false;
+	return (rval == -1) ? errno : 0;
+}
+
+int rcon_send(rcon_connection *conn, const char *message, uint32_t message_type)
+{
+	struct rcon_packet *packet;
+	int rval;
+
+	if (conn == NULL || message == NULL)
+		return EINVAL;
+
+	packet = rcon_create_packet(conn, message, message_type);
+	if (packet == NULL)
+		return errno;
+
+	rval = rcon_send_packet(conn, packet);
+	rcon_free_packet(packet);
 	return rval;
 }
 
-
-/*
- * Form a valid RCON protocol message from the provided body and type.  Returns
- * a pointer to the created message on success, which must be freed with
- * rcon_free_packet().  On failure, NULL is returned and errno is set.
- */
-struct rcon_packet * rcon_create_packet(const char *body, uint32_t message_type)
+char *rcon_recv(rcon_connection *conn)
 {
-	struct rcon_packet *packet = (struct rcon_packet *) calloc(1, sizeof(struct rcon_packet));
+	struct rcon_packet *packet;
+	char *message = NULL;
+	size_t m_size = 1;
+	size_t b_size;
+
+	if (conn == NULL || !conn->is_connected) {
+		errno = ENOTCONN;
+		return NULL;
+	}
+
+	message = calloc(1, 1);
+	if (message == NULL)
+		return NULL;
+
+	for (;;) {
+		packet = rcon_recv_packet(conn);
+		if (packet == NULL) {
+			/* Timeout or end of multi-packet response is normal */
+			return message;
+		}
+
+		b_size = (packet->size > RCON_PACKET_OVERHEAD) ? packet->size - RCON_PACKET_OVERHEAD : 0;
+		if (b_size > 0 && packet->body) {
+			char *new_msg = realloc(message, m_size + b_size);
+			if (new_msg == NULL) {
+				rcon_free_packet(packet);
+				free(message);
+				return NULL;
+			}
+			message = new_msg;
+			strncat(message, packet->body, b_size);
+			m_size += b_size;
+		}
+		rcon_free_packet(packet);
+	}
+}
+
+static struct rcon_packet *rcon_create_packet(rcon_connection *conn, const char *body, uint32_t message_type)
+{
+	struct rcon_packet *packet;
+	size_t body_len;
+
+	if (conn == NULL || body == NULL)
+		return NULL;
+
+	body_len = strlen(body);
+	if (body_len > RCON_MAX_BODY_LEN) {
+		errno = EMSGSIZE;
+		return NULL;
+	}
+
+	packet = calloc(1, sizeof(*packet));
 	if (packet == NULL)
 		return NULL;
 
-	packet->body = (char *) calloc(strlen(body) + 1, sizeof(char));
+	packet->body = malloc(body_len + 1);
 	if (packet->body == NULL) {
 		free(packet);
 		return NULL;
 	}
 
-	packet->size = strlen(body) + 10;	/* sizeof id and type, plus two nulls. */
-	packet->id = ++rcon_packet_id;
+	packet->size = (uint32_t)(body_len + RCON_PACKET_OVERHEAD);
+	packet->id = ++conn->packet_id;
 	packet->type = message_type;
-	strncpy(packet->body, body, strlen(body));
+	memcpy(packet->body, body, body_len + 1);
 	packet->empty = '\0';
 
 	return packet;
 }
 
-
-/*
- * Disconnect from the server.  Return zero on success and errno on failure.
- */
-int rcon_disconnect(void)
-{
-	int rval;
-
-	if (rcon_is_connected == false)
-		return ENOTCONN;
-
-	rval = close(rcon_sockfd);
-	if (rval == -1)
-		return errno;
-
-	rcon_is_connected = false;
-	return 0;
-}
-
-
-/*
- * Identify the target server using the provided address and port.  This must
- * be called prior to calling rcon_auth().
- *
- * Return zero on success and errno on failure.
- */
-int rcon_init(const char *address, uint16_t port)
-{
-	int rval;
-	struct timeval timeout;
-
-	if (address == NULL)
-		return EDESTADDRREQ;
-
-	rcon_packet_id = 0;
-	rcon_is_connected = false;
-
-	bzero(&rcon_sockaddr, sizeof(rcon_sockaddr));
-
-	rcon_sockaddr.sin_family = AF_INET;
-	rcon_sockaddr.sin_addr.s_addr = inet_addr(address);
-	rcon_sockaddr.sin_port = htons(port);
-
-	rcon_sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	if (rcon_sockfd == -1)
-		return errno;
-
-	timeout.tv_sec = 1;
-	timeout.tv_usec = 0;
-	rval = setsockopt(rcon_sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(struct timeval));
-	if (rval == -1)
-		return errno;
-
-	return 0;
-}
-
-
-/* 
- * Free memory allocated to the specified rcon_packet.
- */
-void rcon_free_packet(struct rcon_packet *packet)
+static void rcon_free_packet(struct rcon_packet *packet)
 {
 	if (packet) {
-		if (packet->body)
-			free(packet->body);
-
+		free(packet->body);
 		free(packet);
 	}
 }
 
-
-/*
- * Read one or more RCON protocol messages from the socket and return them as
- * a single string.  On failure, NULL is returned and errno is set.
- *
- * rcon_recv will allocate a buffer for storing the returned response, and
- * this buffer should be freed by the caller.
- */
-char * rcon_recv(void)
+static struct rcon_packet *rcon_recv_packet(rcon_connection *conn)
 {
-	size_t b_size = 0;
-	size_t m_size = 1;
-	char *message = NULL;
-	struct rcon_packet *packet = NULL;
-
-	for(;;) {
-		packet = rcon_recv_packet();
-
-		if (packet == NULL)
-			return message;
-		
-		b_size = packet->size - 10;
-		message = (char *) realloc((void *) message, m_size + b_size);
-
-		if (m_size == 1)
-			message[0] = '\0';
-
-		strncat(message, (const char *) packet->body, b_size);
-		rcon_free_packet(packet);
-		m_size += b_size;
-	}
-}
-
-
-/* Pull a single RCON protocol message from the socket.  A pointer to the
- * packet is returned on success, and the packet must later be freed with
- * rcon_free_packet().  On failure, NULL is returned and errno is set.
- *
- * If no response is received from the server after two seconds, NULL is
- * returned and errno is set to ETIME.
- */
-struct rcon_packet * rcon_recv_packet(void)
-{
+	struct rcon_packet *packet;
+	ssize_t bytes_recd, rval;
 	size_t body_len;
-	ssize_t bytes_recd = 0;
-	struct rcon_packet *packet = NULL;
-	ssize_t rval;
 
-	if (rcon_is_connected == false) {
+	if (conn == NULL || !conn->is_connected) {
 		errno = ENOTCONN;
 		return NULL;
 	}
 
-	packet = (struct rcon_packet *) calloc(1, sizeof(struct rcon_packet));
+	packet = calloc(1, sizeof(*packet));
 	if (packet == NULL)
 		return NULL;
 
-	while (bytes_recd < sizeof(packet->size)) {
-		rval = recv(rcon_sockfd, &(packet->size) + bytes_recd, sizeof(packet->size) - bytes_recd, 0);
-		if (rval == -1) {
-			free(packet);
-			return NULL;
-		}
-
-		bytes_recd += rval;
-	}
-
+	/* Read size */
 	bytes_recd = 0;
-	while (bytes_recd < sizeof(packet->id)) {
-		rval = recv(rcon_sockfd, &(packet->id) + bytes_recd, sizeof(packet->id) - bytes_recd, 0);
-		if (rval == -1) {
+	while (bytes_recd < (ssize_t)sizeof(packet->size)) {
+		rval = recv(conn->sockfd, ((char *)&packet->size) + bytes_recd,
+			    sizeof(packet->size) - bytes_recd, 0);
+		if (rval <= 0) {
 			free(packet);
 			return NULL;
 		}
-
 		bytes_recd += rval;
 	}
 
+	if (packet->size < RCON_MIN_PACKET_SIZE || packet->size > RCON_MAX_BODY_LEN + RCON_PACKET_OVERHEAD) {
+		free(packet);
+		errno = EMSGSIZE;
+		return NULL;
+	}
+
+	/* Read id */
 	bytes_recd = 0;
-	while (bytes_recd < sizeof(packet->type)) {
-		rval = recv(rcon_sockfd, &(packet->type) + bytes_recd, sizeof(packet->type) - bytes_recd, 0);
-		if (rval == -1) {
+	while (bytes_recd < (ssize_t)sizeof(packet->id)) {
+		rval = recv(conn->sockfd, ((char *)&packet->id) + bytes_recd,
+			    sizeof(packet->id) - bytes_recd, 0);
+		if (rval <= 0) {
 			free(packet);
 			return NULL;
 		}
-
 		bytes_recd += rval;
 	}
 
+	/* Read type */
+	bytes_recd = 0;
+	while (bytes_recd < (ssize_t)sizeof(packet->type)) {
+		rval = recv(conn->sockfd, ((char *)&packet->type) + bytes_recd,
+			    sizeof(packet->type) - bytes_recd, 0);
+		if (rval <= 0) {
+			free(packet);
+			return NULL;
+		}
+		bytes_recd += rval;
+	}
+
+	/* After size, id, and type have been read, remaining bytes = size - 8.
+	 * Those are body (including its null) + the final empty null.
+	 * body_len (including null) = size - 9. */
 	body_len = packet->size - 9;
-	packet->body = (char *) calloc(body_len, sizeof(char));
+	if (body_len == 0 || body_len > RCON_MAX_BODY_LEN + 1) {
+		free(packet);
+		errno = EMSGSIZE;
+		return NULL;
+	}
+
+	packet->body = calloc(body_len + 1, 1);
 	if (packet->body == NULL) {
 		free(packet);
 		return NULL;
 	}
 
 	bytes_recd = 0;
-	while (bytes_recd < body_len) {
-		rval = recv(rcon_sockfd, packet->body + bytes_recd, body_len - bytes_recd, 0);
-		if (rval == -1) {
+	while (bytes_recd < (ssize_t)body_len) {
+		rval = recv(conn->sockfd, packet->body + bytes_recd, body_len - bytes_recd, 0);
+		if (rval <= 0) {
 			rcon_free_packet(packet);
 			return NULL;
 		}
-
 		bytes_recd += rval;
 	}
 
+	/* Read the final empty terminator */
 	bytes_recd = 0;
-	while (bytes_recd < sizeof(packet->empty)) {
-		rval = recv(rcon_sockfd, &(packet->empty) + bytes_recd, sizeof(packet->empty) - bytes_recd, 0);
-		if (rval == -1) {
+	while (bytes_recd < (ssize_t)sizeof(packet->empty)) {
+		rval = recv(conn->sockfd, &packet->empty + bytes_recd,
+			    sizeof(packet->empty) - bytes_recd, 0);
+		if (rval <= 0) {
 			rcon_free_packet(packet);
 			return NULL;
 		}
-
 		bytes_recd += rval;
 	}
 
 	return packet;
 }
 
-
-/*
- * Sends the provided message to the server as a Source RCON protocol message
- * of the indicated type.  Zero is returned on success, and errno is returned
- * on failure.
- */
-int rcon_send(const char *message, uint32_t message_type)
+static int rcon_send_packet(rcon_connection *conn, const struct rcon_packet *packet)
 {
-	int rval = 0;
-	struct rcon_packet *packet = rcon_create_packet(message, message_type);
-
-	if (packet) {
-		rval = rcon_send_packet(packet);
-		rcon_free_packet(packet);
-	} else {
-		rval = errno;
-	}
-
-	return rval;
-}
-
-
-/*
- * Send the provided packet to the server.  Zero is returned on error, and
- * errno is returned on failure.
- */
-int rcon_send_packet(const struct rcon_packet *packet)
-{
+	ssize_t bytes_sent, rval;
 	size_t body_len;
-	ssize_t bytes_sent;
-	ssize_t rval;
 
-	if (rcon_is_connected == false)
-		return ENOTCONN;
+	if (conn == NULL || !conn->is_connected || packet == NULL)
+		return (conn && !conn->is_connected) ? ENOTCONN : EINVAL;
 
-	if (packet == NULL)
-		return EINVAL;
-
+	/* Send size + id + type (12 bytes) */
 	bytes_sent = 0;
-	while (bytes_sent < sizeof(uint32_t) * 3) {
-		rval = send(rcon_sockfd,
-			(const void *) packet + bytes_sent,
-			sizeof(uint32_t) * 3 - bytes_sent,
-			0);
-
+	while (bytes_sent < (ssize_t)(sizeof(uint32_t) * 3)) {
+		rval = send(conn->sockfd, ((const char *)packet) + bytes_sent,
+			    sizeof(uint32_t) * 3 - bytes_sent, 0);
 		if (rval == -1)
 			return errno;
-
 		bytes_sent += rval;
 	}
 
-	bytes_sent = 0;
+	/* Send body (including null) */
 	body_len = strlen(packet->body) + 1;
-	while (bytes_sent < body_len) {
-		rval = send(rcon_sockfd,
-			(const void *) packet->body + bytes_sent,
-			body_len - bytes_sent,
-			0);
-
+	bytes_sent = 0;
+	while (bytes_sent < (ssize_t)body_len) {
+		rval = send(conn->sockfd, packet->body + bytes_sent, body_len - bytes_sent, 0);
 		if (rval == -1)
 			return errno;
-
 		bytes_sent += rval;
 	}
 
+	/* Send empty terminator */
 	bytes_sent = 0;
-	while (bytes_sent < sizeof(packet->empty)) {
-		rval = send(rcon_sockfd,
-			(const void *) &(packet->empty) + bytes_sent,
-			sizeof(packet->empty) - bytes_sent,
-			0);
-
+	while (bytes_sent < (ssize_t)sizeof(packet->empty)) {
+		rval = send(conn->sockfd, &packet->empty + bytes_sent,
+			    sizeof(packet->empty) - bytes_sent, 0);
 		if (rval == -1)
 			return errno;
-
 		bytes_sent += rval;
 	}
 

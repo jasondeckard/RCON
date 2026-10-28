@@ -1,4 +1,4 @@
-SRC = main.c rcon.c
+SRC = main.c rcon.c config.c
 INCLUDE = -I ./include
 MAKEFLAGS += --silent
 OPTIONS = -Wall
@@ -15,7 +15,7 @@ debug:
 install: all
 	cp rcon ~/bin
 	chmod 775 ~/bin/rcon
-	mkdir ~/.config/rcon
+	mkdir -p ~/.config/rcon
 	cp ./rcon.conf ~/.config/rcon
 	chmod 660 ~/.config/rcon/rcon.conf
 

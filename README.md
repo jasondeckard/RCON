@@ -1,37 +1,24 @@
-# RCON ![Build](https://github.com/jasondeckard/RCON/actions/workflows/c-cpp.yml/badge.svg) ![Flawfinder](https://github.com/jasondeckard/RCON/actions/workflows/flawfinder-analysis.yml/badge.svg)
+# RCON
 
-A Source RCON Protocol command-line utility.
+A POSIX-compliant command-line utility for communicating with servers that implement the Source RCON Protocol (as defined on the [Valve Developer Community](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol)).
 
 ## Description
 
-RCON is a POSIX compliant command-line utility to facilitate communication with servers adhering to the Source RCON Protocol defined at the [Valve Developer Community](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol).
+RCON lets you send commands to a Source engine dedicated server (or any other server speaking the same protocol) from the command line. Configuration is kept in a simple text file so you do not have to re-type addresses, ports, or passwords for every invocation.
 
 ## Installation
 
-### Build
+### Build requirements
 
-The GNU C development libraries and header files are required to build RCON.
+GNU C development libraries and headers are required.
 
-* apt: `sudo apt install libc6-dev`
+- Debian/Ubuntu: `sudo apt install libc6-dev`
+- Fedora/RHEL: `sudo yum install glibc-devel` (or `dnf`)
+- openSUSE: `sudo zypper in linux-glibc-devel`
 
-* yum: `sudo yum install glibc-devel`
+### Build and install
 
-* zypper: `sudo zypper in linux-glibc-devel`
+```bash
+make
+make install
 
-### Install
-
-`make install` will compile the utility using gcc and copy it to $HOME/bin.  A sample configuration file, rcon.conf, will be copied to $HOME/.config/rcon.  The configuration file should be updated with information regarding your server(s) prior to using RCON.
-
-## Configuration
-
-RCON relies on the existance of the configuration file $HOME/.config/rcon/rcon.conf to obtain server addresses and, optionally, RCON passwords.  A server entry in the configuration file takes the form:
-
-> alias,IP Address,port\[,password\]
-
-The password field is optional, and the user is prompted for the server's password at runtime if one is not provided in the configuration file.
-
-## Usage
-
-`rcon <target> <command>`
-
-**target** is the alias of the server to contact and **command** is the message to send.
