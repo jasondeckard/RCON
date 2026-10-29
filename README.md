@@ -1,10 +1,22 @@
 # RCON
 
-A POSIX-compliant command-line utility for communicating with servers that implement the Source RCON Protocol (as defined on the [Valve Developer Community](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol)).
+A POSIX-compliant command-line utility for communicating with servers that implement the Source RCON Protocol (as defined by the [Valve Developer Community](https://developer.valvesoftware.com/wiki/Source_RCON_Protocol)).
 
 ## Description
 
-RCON lets you send commands to a Source engine dedicated server (or any other server speaking the same protocol) from the command line. Configuration is kept in a simple text file so you do not have to re-type addresses, ports, or passwords for every invocation.
+RCON lets you send commands to a remote server that implements the protocol.  RCON compliant games include but are not limited to:
+
+- ARK: Survival Evolved
+- Conan Exiles
+- Counter Strike: Global Offensive
+- Insurgency
+- Factorio
+- Minecraft Java Edition
+- Palworld
+- Project Zomboid
+- Rust
+
+Configuration is kept in a simple text file so you do not have to re-type addresses, ports, or passwords for every invocation.
 
 ## Installation
 
